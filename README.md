@@ -1,7 +1,7 @@
 # Genome AI 2025
 In this project, I am collaborating with some researchers to train deep learning models related to DNA sequences. I am involved in this project to build practical experience with preparing training data of DNA sequences for deep learning models and eventually implement deep learning models.
 
-**First Assignment: Preprocessing Genomic Data for a seq2fun Task**
+## First Assignment: Preprocessing Genomic Data for a seq2fun Task
 
 The goal of this assignment is to practice turning raw genomic data into input–output pairs for a deep learning model. The workflow is inspired by the DeepSEA dataset and will show you how to prepare data for sequence-to-function (seq2fun) models.
 
@@ -25,6 +25,7 @@ More about the formats:
 * BED: https://en.wikipedia.org/wiki/BED_%28file_format%29
 
 **Task Description**
+
 You will prepare training data similar to DeepSEA. The main idea is to link short DNA sequences with labels that show whether they overlap functional regions from the BED files. To simplify, only **chromosome 22** is required. You may use any bioinformatics tools or packages you like, but the final dataset must be usable in Python for deep learning, please document your enviroment for running for reproduce purpose.
 
 * Split the genome into **200 bp bins**.
