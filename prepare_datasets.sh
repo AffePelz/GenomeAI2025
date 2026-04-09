@@ -6,7 +6,6 @@ GENOME_CHR22="data/genome/Homo_sapiens.chr22.dna.primary_assembly.fa"
 GENOME_FAI="$GENOME.fai"
 GENOME_FILE="data/genome/chr22.genome"
 GENOME_SPLIT="data/genome/genome200bp.bed"
-SCRIPT="prepare_dataset.py"
 
 sudo apt update
 sudo apt install -y python3-venv python3-pip samtools bedtools
@@ -65,16 +64,17 @@ fi
 echo "Labeling bins with BED files..."
 mkdir -p data/labels
 
-paste \
-<(bedtools intersect -a "$GENOME_SPLIT" -b data/bed_data/ENCFF052RRA.bed -f 0.5 -c | awk '{print ($NF>0)}') \
-<(bedtools intersect -a "$GENOME_SPLIT" -b data/bed_data/ENCFF053BLB.bed -f 0.5 -c | awk '{print ($NF>0)}') \
-<(bedtools intersect -a "$GENOME_SPLIT" -b data/bed_data/ENCFF057CRD.bed -f 0.5 -c | awk '{print ($NF>0)}') \
-<(bedtools intersect -a "$GENOME_SPLIT" -b data/bed_data/ENCFF060JHQ.bed -f 0.5 -c | awk '{print ($NF>0)}') \
-<(bedtools intersect -a "$GENOME_SPLIT" -b data/bed_data/ENCFF078AMJ.bed -f 0.5 -c | awk '{print ($NF>0)}') \
-> data/labels/labels_matrix.txt
+cmds=()
+
+for f in data/bed_data/*.bed; do
+  cmds+=("<(bedtools intersect -a \"$GENOME_SPLIT\" -b \"$f\" -f 0.5 -c | awk '{print (\$NF>0)}')")
+done
+
+# Use eval to expand process substitutions
+eval paste "${cmds[@]}" > data/labels/labels_matrix.txt
 
 echo "Labeling complete."
 
-python "$SCRIPT"
+python "main/prepare_dataset.py"
 
-python "build_dataset.py" 
+python "main/build_dataset.py" 

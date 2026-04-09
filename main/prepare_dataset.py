@@ -1,19 +1,25 @@
 from pyfaidx import Fasta
+import numpy as np
 import pandas as pd
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from Bio import SeqIO
 import os
-# ----------------------------
-# Parameters
-# ----------------------------
+import h5py
+
 BIN_BED = "data/genome/genome200bp.bed"           # 200bp bins
 GENOME_FASTA = "data/genome/Homo_sapiens.chr22.dna.primary_assembly.fa"
 OUTPUT_FASTA = "data/genome/sequences_1000bp.fa"
-
+LABEL_FILE = "data/labels/labels_matrix.txt"         # 5-element labels
+OUTPUT_H5 = "data/dataset.h5"                        # HDF5 output
+# ----------------------------
+# Parameters
+# ----------------------------
 WINDOW_SIZE = 1000
 BIN_SIZE = 200
 FLANK = (WINDOW_SIZE - BIN_SIZE) // 2  # 400 bp flanks
+NUM_LABELS = 5
+BATCH_SIZE = 5000  # Adjust depending on memory
 
 def READ_BED(bed_file):
     # Define column names for BED format
