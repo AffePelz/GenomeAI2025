@@ -76,3 +76,5 @@ eval paste "${cmds[@]}" > data/labels/labels_matrix.txt
 echo "Labeling complete."
 
 python "main/prepare_dataset.py"
+
+python "main/GPN_tester.py"
