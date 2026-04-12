@@ -12,34 +12,10 @@ sudo apt install -y python3-venv python3-pip samtools bedtools
 sudo apt upgrade
 sudo apt autoremove
 
-if [ ! -d ".venv" ]; then
-    echo "Creating Python virtual environment..."
-    python3 -m venv ".venv"
-fi
-
+echo "Activating virtual entironment..."
 . ".venv/bin/activate"
 
-echo "Installing Python dependencies..."
-# ----------------------------
-# Install Python packages
-# ----------------------------
-pip show pip > /dev/null 2>&1 || pip install --upgrade pip
 
-packages=(
-    numpy
-    pandas
-    matplotlib
-    torch
-    h5py
-    biopython
-    pyfaidx
-    pysam
-    pybedtools
-)
-
-for p in "${packages[@]}"; do
-    pip show "$p" > /dev/null 2>&1 || pip install "$p"
-done
 # ----------------------------
 # Task 1: Extract chromosome 22 and prepare genome file for bedtools
 # ----------------------------
