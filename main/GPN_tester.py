@@ -179,7 +179,7 @@ df = pd.DataFrame(pwm, columns=["A", "C", "G", "T"])
 
 info = df * (np.log2(df + 1e-6) - np.log2(0.25))
 
-plt.figure(figsize=(12,4))
+#plt.figure(figsize=(12,4))
 logomaker.Logo(info)
 plt.title("DNA Motif (Safe Scan Version)")
 plt.savefig("motif_safe_scan.png")

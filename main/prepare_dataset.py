@@ -98,7 +98,6 @@ def one_hot_encode_batch(sequences):
         arr[i, seq_bytes == b'C', 1] = 1
         arr[i, seq_bytes == b'G', 2] = 1
         arr[i, seq_bytes == b'T', 3] = 1
-        # N or other letters remain [0,0,0,0]
 
     return arr
 
