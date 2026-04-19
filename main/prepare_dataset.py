@@ -8,10 +8,11 @@ import matplotlib.pyplot as plt
 import os
 import h5py
 
-BIN_BED = "data/genome/genome200bp.bed"           # 200bp bins
-GENOME_FASTA = "data/genome/Homo_sapiens.chr22.dna.primary_assembly.fa"
+BIN_BED = "data/genome/window_200bp.bed"           # 200bp bins
+GENOME_FASTA = "data/genome/hg38.fa"              # Genome FASTA file
+
 OUTPUT_FASTA = "data/genome/sequences_1000bp.fa"
-LABEL_FILE = "data/labels/labels_matrix.txt"         # 5-element labels
+LABEL_FILE = "data/bed_data/labels_matrix.txt"         # 5-element labels
 OUTPUT_H5 = "data/dataset.h5"                        # HDF5 output
 # ----------------------------
 # Parameters
@@ -57,8 +58,8 @@ for i, row in bins.iterrows():
     bin_start = int(row["start"])
     bin_end = int(row["end"])
 
-    win_start = bin_start - FLANK
-    win_end = bin_end + FLANK
+    win_start = bin_start - 400
+    win_end = bin_end + 400
 
     seq = ""
 
@@ -86,10 +87,9 @@ for i, row in bins.iterrows():
 # Task 4: Converting DNA to one-hot encoding mapping
 # ----------------------------
 base_to_idx = {"A": 0, "C": 1, "G": 2, "T": 3}
-
 def one_hot_encode_batch(sequences):
     batch_size = len(sequences)
-    arr = np.zeros((batch_size, WINDOW_SIZE, 4), dtype=np.uint8)
+    arr = np.zeros((batch_size, 1000, 4), dtype=np.uint8)
 
     for i, seq in enumerate(sequences):
         seq_bytes = np.frombuffer(seq.upper().encode(), dtype='S1')
@@ -107,7 +107,7 @@ def one_hot_encode_batch(sequences):
 print("Loading labels...")
 y = np.loadtxt(LABEL_FILE, dtype=np.uint8)
 num_sequences = len(y)
-print(f"Number of sequences: {num_sequences}, each with {NUM_LABELS} labels")
+print(f"Number of sequences: {num_sequences}, each with 5 labels")
 
 if __name__ == '__main__':
     # ----------------------------
@@ -161,7 +161,7 @@ if __name__ == '__main__':
     # ----------------------------
     print("\nPlotting label distribution...")
     label_sums = np.sum(y, axis=0)  # sequences per track
-    tracks = [f"Track {i+1}" for i in range(NUM_LABELS)]
+    tracks = [f"Track {i+1}" for i in range(5)]
 
     plt.figure(figsize=(8,5))
     plt.bar(tracks, label_sums)

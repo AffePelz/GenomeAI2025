@@ -12,7 +12,7 @@ import random
 # -----------------------------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-FASTA_FILE = "data/genome/Homo_sapiens.chr22.dna.primary_assembly.fa"
+FASTA_FILE = "data/genome/chr22.fa"  # Use chromosome 22 for demo
 
 SEQ_LEN = 512
 BATCH_SIZE = 8
@@ -57,6 +57,7 @@ print("Loading genome...")
 raw = load_fasta(FASTA_FILE)
 genome = "".join(clean(s) for s in raw)
 genome_tensor = encode(genome)
+print(genome[:100])
 
 print("Genome length:", len(genome))
 
@@ -178,9 +179,5 @@ pwm /= len(seqs)
 df = pd.DataFrame(pwm, columns=["A", "C", "G", "T"])
 
 info = df * (np.log2(df + 1e-6) - np.log2(0.25))
-
-#plt.figure(figsize=(12,4))
-logomaker.Logo(info)
-plt.title("DNA Motif (Safe Scan Version)")
-plt.savefig("motif_safe_scan.png")
-plt.show()
+# -----------------------------
+print("Completed")

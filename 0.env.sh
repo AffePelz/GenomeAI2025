@@ -33,6 +33,8 @@ packages=(
     pysam
     pybedtools
     logomaker
+    datasets
+    zstandard
 )
 
 for p in "${packages[@]}"; do
