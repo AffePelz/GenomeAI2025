@@ -5,6 +5,7 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from Bio import SeqIO
 import matplotlib.pyplot as plt
+from pathlib import Path
 import os
 import h5py
 
@@ -54,7 +55,7 @@ bins = READ_BED(BIN_BED)
 # ----------------------------
 records = []
 for i, row in bins.iterrows():
-    chrom = row["chr"]        # Must match FASTA header exactly ("22")
+    chrom = row["chr"]
     bin_start = int(row["start"])
     bin_end = int(row["end"])
 
@@ -86,13 +87,17 @@ for i, row in bins.iterrows():
 # ----------------------------
 # Task 4: Converting DNA to one-hot encoding mapping
 # ----------------------------
-base_to_idx = {"A": 0, "C": 1, "G": 2, "T": 3}
+import numpy as np
+
 def one_hot_encode_batch(sequences):
     batch_size = len(sequences)
-    arr = np.zeros((batch_size, 1000, 4), dtype=np.uint8)
+    seq_len = len(sequences[0])  # assume all same length
+
+    arr = np.zeros((batch_size, seq_len, 4), dtype=np.uint8)
 
     for i, seq in enumerate(sequences):
-        seq_bytes = np.frombuffer(seq.upper().encode(), dtype='S1')
+        seq = seq.upper()
+        seq_bytes = np.frombuffer(seq.encode(), dtype='S1')
 
         arr[i, seq_bytes == b'A', 0] = 1
         arr[i, seq_bytes == b'C', 1] = 1
@@ -107,54 +112,55 @@ def one_hot_encode_batch(sequences):
 print("Loading labels...")
 y = np.loadtxt(LABEL_FILE, dtype=np.uint8)
 num_sequences = len(y)
-print(f"Number of sequences: {num_sequences}, each with 5 labels")
 
 if __name__ == '__main__':
     # ----------------------------
     # Task 3: Save sequences to FASTA
     # ----------------------------
-    os.makedirs(os.path.dirname(OUTPUT_FASTA), exist_ok=True)
-    SeqIO.write(records, OUTPUT_FASTA, "fasta")
+    if Path(OUTPUT_H5).is_file():
+        print("File exists, skipping...")
+    else:
+        os.makedirs(os.path.dirname(OUTPUT_H5), exist_ok=True)
+        SeqIO.write(records, OUTPUT_H5, "fasta")
+        with h5py.File(OUTPUT_H5, "w") as h5f:
+            X_ds = h5f.create_dataset(
+                "X", shape=(num_sequences, WINDOW_SIZE, 4),
+                dtype=np.uint8, compression="gzip"
+            )
+            y_ds = h5f.create_dataset(
+                "y", data=y,
+                dtype=np.uint8, compression="gzip"
+            )
 
-    print(f"Saved {len(records)} sequences of length {WINDOW_SIZE} bp to {OUTPUT_FASTA}")
+            # ----------------------------
+            # Process sequences in batches
+            # ----------------------------
+            print("Converting sequences to one-hot encoding in batches...")
+            seq_batch = []
+            idx_start = 0
+
+            for i, record in enumerate(SeqIO.parse(OUTPUT_FASTA, "fasta")):
+                seq_batch.append(str(record.seq))
+
+                if len(seq_batch) == BATCH_SIZE or (i + 1) == num_sequences:
+                    arr = one_hot_encode_batch(seq_batch)
+                    X_ds[idx_start:idx_start+len(seq_batch)] = arr
+
+                    idx_start += len(seq_batch)
+                    seq_batch = []
+
+                    print(f"Processed {idx_start}/{num_sequences} sequences")
+                
+                print("One-hot encoding complete.")
+                print("Dataset saved to:", OUTPUT_H5)
+
 
     # ----------------------------
     # Prepare HDF5 file
     # ----------------------------
-    os.makedirs(os.path.dirname(OUTPUT_H5), exist_ok=True)
-    with h5py.File(OUTPUT_H5, "w") as h5f:
-        X_ds = h5f.create_dataset(
-            "X", shape=(num_sequences, WINDOW_SIZE, 4),
-            dtype=np.uint8, compression="gzip"
-        )
-        y_ds = h5f.create_dataset(
-            "y", data=y,
-            dtype=np.uint8, compression="gzip"
-        )
-
-        # ----------------------------
-        # Process sequences in batches
-        # ----------------------------
-        print("Converting sequences to one-hot encoding in batches...")
-        seq_batch = []
-        idx_start = 0
-
-        for i, record in enumerate(SeqIO.parse(OUTPUT_FASTA, "fasta")):
-            seq_batch.append(str(record.seq))
-
-            if len(seq_batch) == BATCH_SIZE or (i + 1) == num_sequences:
-                arr = one_hot_encode_batch(seq_batch)
-                X_ds[idx_start:idx_start+len(seq_batch)] = arr
-
-                idx_start += len(seq_batch)
-                seq_batch = []
-
-                print(f"Processed {idx_start}/{num_sequences} sequences")
-
-        print("One-hot encoding complete.")
-        print("Dataset saved to:", OUTPUT_H5)
-        print("X shape:", X_ds.shape)
-        print("y shape:", y_ds.shape)
+    with h5py.File(OUTPUT_H5, "r") as h5f:
+        print("X shape:", h5f["X"].shape)
+        print("y shape:", h5f["y"].shape)
     
     # ----------------------------
     # Plot label distribution per track
@@ -171,6 +177,4 @@ if __name__ == '__main__':
 
     plot_path = "label_distribution.png"
     plt.savefig(plot_path)
-    plt.show()
-
     print(f"Label distribution plot saved to {plot_path}")

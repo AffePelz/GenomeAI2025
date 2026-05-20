@@ -35,6 +35,7 @@ packages=(
     logomaker
     datasets
     zstandard
+    tables
 )
 
 for p in "${packages[@]}"; do
