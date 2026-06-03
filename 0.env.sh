@@ -36,6 +36,7 @@ packages=(
     datasets
     zstandard
     tables
+    transformers
 )
 
 for p in "${packages[@]}"; do

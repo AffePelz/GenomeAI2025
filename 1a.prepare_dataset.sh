@@ -18,7 +18,7 @@ echo "Activating virtual environment"
 . ".venv/bin/activate"
 
 echo "Extracting the regions of the FASTA file..."
-samtools faidx data/genome/hg38.fa
+# samtools faidx data/genome/hg38.fa
 samtools faidx data/genome/hg38.fa 22 > data/genome/chr22.fa
 
 # ---------------------
