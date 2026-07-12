@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 set -eu
+
+echo "================================================================="
+echo " System Updates & Dependencies"
+echo "================================================================="
 sudo apt update
 sudo apt install -y python3-venv python3-pip samtools bedtools
-sudo apt upgrade
-sudo apt autoremove
+sudo apt upgrade -y
+sudo apt autoremove -y
 
+echo "================================================================="
+echo " Python Virtual Environment Setup"
+echo "================================================================="
 if [ ! -d ".venv" ]; then
     echo "Creating Python virtual environment..."
     python3 -m venv ".venv"
@@ -12,16 +19,17 @@ else
     echo "Python virtual environment already exists - skipping creation"
 fi
 
-echo "Activating virtual entironment..."
+echo "Activating virtual environment..."
 . ".venv/bin/activate"
 
-echo "Installing Python dependencies..."
+echo "Upgrading pip..."
+pip install --upgrade pip
 
-# ----------------------------
-# Install Python packages
-# ----------------------------
-pip show pip > /dev/null 2>&1 || pip install --upgrade pip
+echo "================================================================="
+echo " Installing Python Dependencies"
+echo "================================================================="
 
+# Core packages required for data processing and training
 packages=(
     numpy
     pandas
@@ -36,9 +44,19 @@ packages=(
     datasets
     zstandard
     tables
-    transformers
+    wandb
+    python-dotenv
+    scikit-learn
+    fire
+    accelerate
 )
 
+# Install missing packages selectively
 for p in "${packages[@]}"; do
-    pip show "$p" > /dev/null 2>&1 || pip install "$p"
+    if pip show "$p" > /dev/null 2>&1; then
+        echo "  [✓] $p is already installed"
+    else
+        echo "  [+] Installing $p..."
+        pip install "$p"
+    fi
 done

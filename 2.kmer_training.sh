@@ -4,4 +4,4 @@ set -eu
 echo "Activating virtual environment"
 . ".venv/bin/activate"
 
-python main/kmer_dataset.py
+python main/kmer_training.py
