@@ -2,7 +2,7 @@
 
 In this projects, I am collaborating with researchers in optimizing and training deep learning models on genomic sequencing, understanding their functional implications and analysing and predicting genetic variants. This project requires background in mathematics (mashine learning and deep learning), informatics (mainly programming with Python and the library PyTorch) and bioinformatics (about DNA sequencing). Throughout this project, I am gaining practical experience in high-performance computation, designing, implementing and training deep learning models.
 
-## First Assignment: Preprocessing Genomic Data
+## Assignment: Preprocessing Genomic Data
 
 The goal of this assignment is to practice turning raw genomic data into input-output pairs for a deep learning model. The workshow is inspired by the DeepSEA dataset and will show you how to prepare data for sequence-to-function models. You will prepare training data similar to DeepSEA. The main idea is to link short DNA sequences with labels that show whether they overlap functional regions from the BED files. To simplify, only **chromosome 22** is required. You may use any bioinformatics tools or packages you like, but the final dataset must be usable in Python for deep learning, please document your enviroment for running for reproduce purpose.
 
