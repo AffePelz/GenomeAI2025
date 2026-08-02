@@ -48,4 +48,4 @@ paste data/labels/*.txt > data/bed_data/labels_matrix.txt
 rm -rf data/labels
 
 
-python main/prepare_dataset.py
+python main/GenomeDataset.py
