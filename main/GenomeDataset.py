@@ -1,180 +1,335 @@
 import os
-import numpy as np
 import h5py
+import torch
+import pysam
+import numpy as np
 import pandas as pd
-from Bio import SeqIO
-from pybedtools import BedTool
 import matplotlib.pyplot as plt
-# ----------------------------
-# Files and parameters
-# ----------------------------
-FASTA_FILE = "data/genome/chr22.fa"
-BED_FILES = ["data/bed_data/ENCFF052RRA.bed",
-             "data/bed_data/ENCFF053BLB.bed",
-             "data/bed_data/ENCFF057CRD.bed",
-             "data/bed_data/ENCFF060JHQ.bed",
-             "data/bed_data/ENCFF078AMJ.bed"]
-OUTPUT_H5 = "data/dataset.h5"
+from pybedtools import BedTool, cleanup
+from torch.utils.data import Dataset, DataLoader
+from typing import Dict, List, Optional, Set, Tuple
 
-CHROM = "chr22"
-BIN_SIZE = 200
-FLANK_SIZE = 400
-WINDOW_SIZE = 1000
+# -------------------------------------------------------------------
+# 1. Path Management
+# -------------------------------------------------------------------
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 
-def READ_BED(bed_file):
-    column_names = ['chr', 'start', 'end']
-    bed_df = pd.read_csv(bed_file, sep='\t', header=None, names=column_names, usecols=[0, 1, 2], dtype={'chr': str})
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+FASTA_PATH = os.path.join(DATA_DIR, "FASTA", "hg38.fa")  # Update to your FASTA filename if needed
+H5_PATH = os.path.join(DATA_DIR, "dataset.h5")
 
-    bed_df['chr'] = bed_df['chr'].str.replace('chr', '', regex=False)
-    bed_df['start'] = bed_df['start'].astype(int)
-    bed_df['end'] = bed_df['end'].astype(int)
+BED_FILES = [
+    os.path.join(DATA_DIR, "BED", "ENCFF052RRA.bed"),
+    os.path.join(DATA_DIR, "BED", "ENCFF053BLB.bed"),
+    os.path.join(DATA_DIR, "BED", "ENCFF057CRD.bed"),
+    os.path.join(DATA_DIR, "BED", "ENCFF060JHQ.bed"),
+    os.path.join(DATA_DIR, "BED", "ENCFF078AMJ.bed")
+]
 
-    return bed_df
 
-def load_chromosome_sequence(fasta_path):
-    print(f"Loading sequence from {fasta_path}...")
-    record = SeqIO.read(fasta_path, "fasta") # We have only one record, chromosome 22
-    print(f"Successfully loaded sequence ID: {record.id}")
+def normalize_chrom(chrom: str) -> str:
+    """Standardizes chromosome names (e.g., '22' -> 'chr22')."""
+    chrom = str(chrom).strip().lower()
+    if chrom in ("mt", "chrm", "mitochondria"):
+        return "chrm"
+    if not chrom.startswith("chr"):
+        chrom = f"chr{chrom}"
+    return chrom
 
-    return str(record.seq)
+# -------------------------------------------------------------------
+# 2. Sequence Extraction & Annotation Classes
+# -------------------------------------------------------------------
+class Genome:
+    def __init__(self, path: str, include_chroms: Optional[Set[str]] = None):
+        self.path = path
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"FASTA file not found at: {path}")
 
-# ----------------------------
-# Task 4: Converting DNA to one-hot encoding mapping
-# ----------------------------
-def one_hot_encode(sequences):
-    batch_size = len(sequences)
-    seq_len = len(sequences[0])  # 1000 bp
+        self.include_chroms = (
+            {normalize_chrom(c) for c in include_chroms} if include_chroms else None
+        )
+        self._genome: Dict[str, str] = self._load_fasta(path)
 
-    arr = np.zeros((batch_size, seq_len, 4), dtype=np.uint8)
+    def _load_fasta(self, path: str) -> Dict[str, str]:
+        fasta = pysam.FastaFile(path)
+        genome = {}
+        try:
+            for raw_chrom in fasta.references:
+                norm = normalize_chrom(raw_chrom)
+                if self.include_chroms is not None and norm not in self.include_chroms:
+                    continue
+                genome[norm] = fasta.fetch(raw_chrom)
+        finally:
+            fasta.close()
+        return genome
 
-    for i, seq in enumerate(sequences):
-        seq = seq.upper()
-        seq_bytes = np.frombuffer(seq.encode(), dtype='S1')
+    def get_binned_windows(
+        self,
+        chrom: str,
+        bin_size: int = 200,
+        flank_size: int = 400
+    ) -> Tuple[List[Tuple[str, int, int]], List[str]]:
+        norm_chrom = normalize_chrom(chrom)
+        if norm_chrom not in self._genome:
+            raise KeyError(f"Chromosome '{chrom}' not found.")
 
-        # Map A->0, C->1, G->2, T->3
-        arr[i, seq_bytes == b'A', 0] = 1
-        arr[i, seq_bytes == b'C', 1] = 1
-        arr[i, seq_bytes == b'G', 2] = 1
-        arr[i, seq_bytes == b'T', 3] = 1
+        chrom_seq = self._genome[norm_chrom]
+        chrom_len = len(chrom_seq)
+        target_window_len = bin_size + (2 * flank_size)  # 1,000 bp
 
-    return arr
+        coords = []
+        windows = []
 
-def build_pipeline():
-    # 1. Load sequence up front
-    chrom_seq = load_chromosome_sequence(FASTA_FILE)
-    chrom_size = len(chrom_seq)
-    print(f"{CHROM} size: {chrom_size} bp")
-    print("Generating 200bp genome bins...")
+        for bin_start in range(0, chrom_len, bin_size):
+            bin_end = min(bin_start + bin_size, chrom_len)
+            coords.append((norm_chrom, bin_start, bin_end))
 
-    bins = []
-    for start in range(0, chrom_size, BIN_SIZE):
-        end = min(start + BIN_SIZE, chrom_size)
-        bins.append((CHROM, start, end))
-    
-    bins_bed = BedTool(bins)
-    num_bins = len(bins_bed)
-    print(f"Total bins generated: {num_bins}")
+            win_start = bin_start - flank_size
+            win_end = bin_end + flank_size
 
-    # 2. Label Generation (Matrix shape: [num_bins, 5])
-    labels_matrix = np.zeros((num_bins, len(BED_FILES)), dtype=np.int8)
-
-    for idx, bed_path in enumerate(BED_FILES):
-        print(f"Processing overlaps for {bed_path}...")
-        if not os.path.exists(bed_path):
-            raise FileNotFoundError(f"Could not find BED file: {bed_path}")
-            
-        bed_track = BedTool(bed_path)
-        intersect = bins_bed.intersect(bed_track, wo=True, nonamecheck=True)
-        
-        for feature in intersect:
-            bin_start = int(feature[1])
-            overlap_bp = int(feature[-1])
-            
-            if overlap_bp >= 100:
-                bin_idx = bin_start // BIN_SIZE
-                if bin_idx < num_bins:
-                    labels_matrix[bin_idx, idx] = 1
-    
-    # 3. Input Sequence Extraction and One-Hot Encoding
-    print(f"Writing dataset to {OUTPUT_H5}...")
-    with h5py.File(OUTPUT_H5, 'w') as hf:
-        x_ds = hf.create_dataset('X', (num_bins, WINDOW_SIZE, 4), dtype=np.uint8, chunks=(128, WINDOW_SIZE, 4), compression="gzip")
-        y_ds = hf.create_dataset('y', data=labels_matrix, chunks=(128, 5), compression="gzip")
-
-        batch_sequences = []
-        batch_indices = []
-        batch_size_limit = 10000
-
-        for i, b in enumerate(bins):
-            _, start, end = b
-            
-            # Center the 1000bp window over the 200bp bin
-            window_start = start - FLANK_SIZE
-            window_end = end + FLANK_SIZE
-            
-            # 1. Track how much we drop off the left edge
             left_pad = 0
-            if window_start < 0:
-                left_pad = abs(window_start)
-                window_start = 0
-                
-            # 2. Slice whatever is available within safe bounds
-            if window_end > chrom_size:
-                window_end = chrom_size
-            
-            seq_chunk = chrom_seq[window_start:window_end]
-            
-            # 3. Form the initial sequence with left padding
-            final_seq = ('N' * left_pad) + seq_chunk
-            
-            # 4. Dynamically pad the right side to guarantee exactly 1000bp
-            # This cleanly handles both edge drop-off AND truncated end-of-chromosome bins!
-            if len(final_seq) < WINDOW_SIZE:
-                right_pad = WINDOW_SIZE - len(final_seq)
-                final_seq = final_seq + ('N' * right_pad)
-            
-            batch_sequences.append(final_seq)
-            batch_indices.append(i)
+            if win_start < 0:
+                left_pad = abs(win_start)
+                win_start = 0
 
-            # Write out batch when limit reached or at the final bin
-            if len(batch_sequences) == batch_size_limit or i == num_bins - 1:
-                one_hot_batch = one_hot_encode(batch_sequences)
-                
-                # Slice into the H5 dataset using our tracking indices
-                start_idx = batch_indices[0]
-                end_idx = batch_indices[-1] + 1
-                x_ds[start_idx:end_idx] = one_hot_batch
-                
-                # Reset batch containers
-                batch_sequences = []
-                batch_indices = []
+            if win_end > chrom_len:
+                win_end = chrom_len
 
-            if i % 50000 == 0 and i > 0:
-                print(f"Processed {i}/{num_bins} bins...")
+            chunk = chrom_seq[win_start:win_end]
+            window_seq = ("N" * left_pad) + chunk
 
-    print("Success! Dataset generated successfully.")
+            if len(window_seq) < target_window_len:
+                right_pad = target_window_len - len(window_seq)
+                window_seq = window_seq + ("N" * right_pad)
 
-if __name__ == "__main__":
-    build_pipeline()
+            windows.append(window_seq)
 
-    print("\nVerifying H5 file structures and shapes:")
-    with h5py.File(OUTPUT_H5, 'r') as hf:
-        print(f"Keys in H5 file: {list(hf.keys())}")
-        print(f"Shape of X (Input Data):  {hf['X'].shape}")
-        print(f"Shape of y (Labels):      {hf['y'].shape}")
+        return coords, windows
+
+
+class PeakAnnotator:
+    def __init__(self, bed_paths: List[str]):
+        self.bed_paths = bed_paths
+        self.num_tracks = len(bed_paths)
+        self.bed_tools: List[BedTool] = []
+
+        for path in self.bed_paths:
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"BED file missing at: {path}")
+
+            df = pd.read_csv(path, sep='\t', header=None, usecols=[0, 1, 2], dtype={0: str})
+            df[0] = df[0].apply(normalize_chrom)
+            bed_str = df.to_csv(sep='\t', header=False, index=False)
+            bt = BedTool(bed_str, from_string=True).sort()
+            self.bed_tools.append(bt)
+
+    def annotate_bins(
+        self, 
+        coords: List[Tuple[str, int, int]], 
+        min_overlap_bp: int = 100
+    ) -> np.ndarray:
+        if not coords:
+            return np.zeros((0, self.num_tracks), dtype=np.int8)
+
+        bed_str = "\n".join(
+            f"{normalize_chrom(chrom)}\t{start}\t{end}\t{i}" 
+            for i, (chrom, start, end) in enumerate(coords)
+        )
+        bins_bt = BedTool(bed_str, from_string=True)
+        labels = np.zeros((len(coords), self.num_tracks), dtype=np.int8)
+
+        for track_idx, bed_tool in enumerate(self.bed_tools):
+            intersection = bins_bt.intersect(bed_tool, wo=True)
+            for feature in intersection:
+                bin_idx = int(feature[3])
+                overlap_bp = int(feature[-1])
+                if overlap_bp >= min_overlap_bp:
+                    labels[bin_idx, track_idx] = 1
+
+        cleanup()
+        return labels
+
+# -------------------------------------------------------------------
+# Plotting & Execution Logic
+# -------------------------------------------------------------------
+def plot_bed_track_distribution(
+    labels: np.ndarray, 
+    bed_paths: List[str], 
+    output_filename: str = "bed_track_distribution.png"
+):
+    # Generates and saves a clean bar chart showing positive bins per BED track.
+    num_bins, num_tracks = labels.shape
+    pos_counts = np.sum(labels == 1, axis=0)
+    percentages = (pos_counts / num_bins) * 100
     
+    # Extract readable accession names (e.g., 'ENCFF052RRA')
+    track_labels = [os.path.basename(p).replace(".bed", "") for p in bed_paths]
+
+    # Print terminal output
+    print("\n" + "=" * 60)
+    print(f"TOTAL BINS EVALUATED: {num_bins:,}")
+    print("=" * 60)
+    for i in range(num_tracks):
+        print(f"Track {i+1} [{track_labels[i]}]: {pos_counts[i]:10,} positive bins ({percentages[i]:5.2f}%)")
+
+    # Plot configuration
+    fig, ax = plt.subplots(figsize=(10, 6))
+    bars = ax.bar(
+        track_labels, 
+        pos_counts, 
+        color="#2b5c8f", 
+        edgecolor="#1a3857", 
+        linewidth=1.2, 
+        width=0.55
+    )
+
+    # Annotate bar tops with exact count and percentage
+    for bar, count, pct in zip(bars, pos_counts, percentages):
+        height = bar.get_height()
+        ax.annotate(
+            f"{count:,}\n({pct:.2f}%)",
+            xy=(bar.get_x() + bar.get_width() / 2, height),
+            xytext=(0, 5),
+            textcoords="offset points",
+            ha="center", 
+            va="bottom",
+            fontsize=10,
+            fontweight="bold"
+        )
     
-    y = np.loadtxt("data/bed_data/labels_matrix.txt", dtype=np.uint8)
+    # Give overhead room for annotations
+    ax.set_ylim(0, max(pos_counts) * 1.18 if max(pos_counts) > 0 else 10)
 
-    print("\nPlotting label distribution...")
-    label_sums = np.sum(y, axis=0)  # sequences per track
-    tracks = [f"Track {i+1}" for i in range(5)]
-
-    plt.figure(figsize=(8,5))
-    plt.bar(tracks, label_sums)
-    plt.ylabel("Number of sequences")
-    plt.title("Label distribution per track")
     plt.tight_layout()
+    plt.savefig(output_filename, dpi=300)
+    plt.close()
+    
+    print(f"\nPlot saved to '{output_filename}'!")
 
-    plt.savefig("label_distribution.png")
-    print(f"Label distribution plot saved!")
+# -------------------------------------------------------------------
+# 3. Builder Function
+# -------------------------------------------------------------------
+def build_h5_dataset(
+    fasta_path: str,
+    bed_files: List[str],
+    target_chroms: Set[str],
+    output_h5: str
+):
+    os.makedirs(os.path.dirname(output_h5), exist_ok=True)
+    
+    print(f"1. Reading sequence from '{fasta_path}' for {target_chroms}...")
+    genome = Genome(fasta_path, include_chroms=target_chroms)
+
+    all_coords = []
+    all_windows = []
+    
+    for chrom in target_chroms:
+        coords, windows = genome.get_binned_windows(chrom, bin_size=200, flank_size=400)
+        all_coords.extend(coords)
+        all_windows.extend(windows)
+
+    num_samples = len(all_coords)
+    print(f"2. Annotating {num_samples:,} genomic bins against {len(bed_files)} BED tracks...")
+    annotator = PeakAnnotator(bed_files)
+    labels = annotator.annotate_bins(all_coords, min_overlap_bp=100)
+
+    print(f"3. Writing output HDF5 to '{output_h5}'...")
+    ascii_sequences = np.frombuffer("".join(all_windows).encode("ascii"), dtype=np.uint8).reshape(num_samples, 1000)
+
+    with h5py.File(output_h5, 'w') as hf:
+        hf.create_dataset(
+            'sequences', 
+            data=ascii_sequences, 
+            dtype=np.uint8, 
+            chunks=(256, 1000), 
+            compression="gzip"
+        )
+        hf.create_dataset(
+            'labels', 
+            data=labels, 
+            dtype=np.int8, 
+            chunks=(256, len(bed_files)), 
+            compression="gzip"
+        )
+
+    print("Success! HDF5 file created.")
+
+
+# -------------------------------------------------------------------
+# Task 4: One-Hot Encoding & Pytorch Dataset
+# -------------------------------------------------------------------
+def fast_one_hot_encode(seq_bytes: np.ndarray) -> torch.Tensor:
+    one_hot = np.zeros((len(seq_bytes), 4), dtype=np.float32)
+    one_hot[(seq_bytes == 65) | (seq_bytes == 97), 0] = 1.0   # A / a
+    one_hot[(seq_bytes == 67) | (seq_bytes == 99), 1] = 1.0   # C / c
+    one_hot[(seq_bytes == 71) | (seq_bytes == 103), 2] = 1.0  # G / g
+    one_hot[(seq_bytes == 84) | (seq_bytes == 116), 3] = 1.0  # T / t
+    return torch.from_numpy(one_hot)
+
+
+class GenomicDataset(Dataset):
+    def __init__(self, h5_path: str):
+        self.h5_path = h5_path
+        self._h5_file = None
+        
+        if not os.path.exists(self.h5_path):
+            raise FileNotFoundError(f"Cannot open HDF5 dataset. File missing at: {self.h5_path}")
+
+        with h5py.File(self.h5_path, 'r') as hf:
+            self.length = len(hf['sequences'])
+
+    def _open_h5(self):
+        if self._h5_file is None:
+            self._h5_file = h5py.File(self.h5_path, 'r')
+
+    def __len__(self) -> int:
+        return self.length
+
+    def __getitem__(self, idx: int):
+        self._open_h5()
+        seq_ascii = self._h5_file['sequences'][idx]
+        y_label = self._h5_file['labels'][idx]
+
+        x_tensor = fast_one_hot_encode(seq_ascii)
+        y_tensor = torch.from_numpy(y_label).float()
+        return x_tensor, y_tensor
+
+
+# -------------------------------------------------------------------
+# 5. Execution Pipeline
+# -------------------------------------------------------------------
+if __name__ == "__main__":
+    # 1. Generate 200 bp bins for chr22
+    genome = Genome("data/FASTA/chr22.fa", include_chroms={"chr22"})
+    coords, windows = genome.get_binned_windows("chr22", bin_size=200, flank_size=400)
+
+    # 2. Annotate bins using normalized PeakAnnotator
+    annotator = PeakAnnotator(BED_FILES)
+    labels = annotator.annotate_bins(coords, min_overlap_bp=100)
+
+    # 3. Render and save plot
+    plot_bed_track_distribution(labels, BED_FILES, output_filename="label_distribution.png")
+    # Check if HDF5 dataset exists; build it if missing
+    if not os.path.exists(H5_PATH):
+        print(f"HDF5 file not found at '{H5_PATH}'. Generating dataset now...")
+        build_h5_dataset(
+            fasta_path=FASTA_PATH,
+            bed_files=BED_FILES,
+            target_chroms={"chr22"},
+            output_h5=H5_PATH
+        )
+    else:
+        print(f"Found existing HDF5 dataset at '{H5_PATH}'.")
+
+    # Load dataset with PyTorch
+    dataset = GenomicDataset(H5_PATH)
+    dataloader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=2)
+
+    print(f"\nTotal dataset size: {len(dataset):,} binned windows")
+
+    for X_batch, y_batch in dataloader:
+        print("\n--- Verification Batch ---")
+        print(f"X batch shape: {X_batch.shape}")  # torch.Size([64, 1000, 4])
+        print(f"y batch shape: {y_batch.shape}")  # torch.Size([64, 5])
+        break
