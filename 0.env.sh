@@ -49,6 +49,7 @@ packages=(
     scikit-learn
     fire
     accelerate
+    numdifftools
 )
 
 # Install missing packages selectively
