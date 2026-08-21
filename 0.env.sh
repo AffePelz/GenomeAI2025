@@ -5,7 +5,8 @@ echo "================================================================="
 echo " System Updates & Dependencies"
 echo "================================================================="
 sudo apt update
-sudo apt install -y python3-venv python3-pip samtools bedtools
+# Added build-essential, g++, and python3-dev
+sudo apt install -y build-essential g++ python3-dev python3-venv python3-pip samtools bedtools zlib1g-dev
 sudo apt upgrade -y
 sudo apt autoremove -y
 
@@ -22,8 +23,8 @@ fi
 echo "Activating virtual environment..."
 . ".venv/bin/activate"
 
-echo "Upgrading pip..."
-pip install --upgrade pip
+echo "Upgrading pip, setuptools, and wheel..."
+pip install --upgrade pip setuptools wheel
 
 echo "================================================================="
 echo " Installing Python Dependencies"
